@@ -119,5 +119,5 @@ for layer, sae in saes.items():
         path_or_fileobj=local_path,
         path_in_repo=f"sae_layer{layer}.pt",
         repo_id=f"rpeddu/deepseek-sae{layer}",  
-        token="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" 
+        token="" 
     )
