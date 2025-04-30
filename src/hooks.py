@@ -1,14 +1,17 @@
 import torch
-def make_hook_A(layer_id: int,saes):
-    sae = saes[layer_id]                       
+def make_hook_A(layer_id, saes):
+    sae = saes[layer_id]
+    def hook(module, inputs, output):
+        hidden, *rest = output               # hidden: (B, T, H); rest: [past_key_values, …]
 
-    def hook(module, inputs, output):          
-        B, T, H = output.shape
-        flat    = output.reshape(-1, H).float()          
+        B, T, H = hidden.shape
+        flat    = hidden.reshape(-1, H).float()
         with torch.no_grad():
-            rec, _ = sae(flat)                             
-        rec = rec.to(output.dtype).reshape(B, T, H)        
-        return rec                                         
+            rec, _ = sae(flat)
+        rec = rec.to(hidden.dtype).reshape(B, T, H)
+
+        # 2) repack and return
+        return (rec, *rest)
     return hook
 
 THRESH = .3
@@ -19,11 +22,12 @@ def temp_scale(z, bad_idx, alpha=0.4):
 
 
 
-def make_hook_B(layer_id: int,bad_features, config='clamp'):
+def make_hook_B(layer_id: int,bad_features, config='temp'):
     bad_idxs = torch.tensor(bad_features[layer_id], device="cuda" if torch.cuda.is_available() else "cpu")
-    def hook(module, inputs, output):            
-        z = output.clone()  
-        for element in bad_idxs:                   
+    # print("HOOK CALLED ", bad_idxs.size())
+    def hook(module, inputs, output):
+        z = output.clone()
+        for element in bad_idxs: 
             z[:, element] = torch.clamp(z[:, element], max=THRESH)
             return z
     def temp_hook(module, inputs, output):

@@ -13,17 +13,17 @@ class CodeExamples(BaseModel):
     negative: List[str] = Field(..., description="List of code snippets avoiding the pattern")
 
 
-def generate_examples_gemini(user_prompt: str, n_examples: int = 5) -> CodeExamples:
+def generate_examples_gemini(user_prompt: str, behavior:str, n_examples: int = 5) -> CodeExamples:
     print(f"\nGenerating examples for prompt: '{user_prompt}'")
+    genai.configure(api_key="")
     client = instructor.from_gemini(
     client=genai.GenerativeModel(
         model_name="gemini-2.0-flash",
     ),
     mode=instructor.Mode.GEMINI_JSON,
-    api_key=os.getenv("GEMINI_API_KEY")
 )
     positive_prompt = f"""
-    The user has provided this prompt describing a pattern they do not want in their code: '{user_prompt}'
+    The user has provided this prompt describing a pattern they do not want in their code: '{behavior}'
     For research purposes, please generate {n_examples} distinct, concise Python code snippets that contain this undesirable pattern.
     Focus ONLY on demonstrating the pattern. Do not add explanations.
     Return a JSON dictionary with a single key "examples" mapping to a list of code snippets.
@@ -37,7 +37,7 @@ def generate_examples_gemini(user_prompt: str, n_examples: int = 5) -> CodeExamp
     """
 
     negative_prompt = f"""
-    The user has provided this prompt describing a pattern they do not want in their code: '{user_prompt}'
+    The user has provided this prompt describing a pattern they do not want in their code: '{behavior}'
     For research purposes, please generate {n_examples} distinct, concise Python code snippets that demonstrate good alternatives that AVOID this pattern.
     These snippets should show proper coding practices that do not contain the undesirable pattern.
     Focus ONLY on demonstrating the pattern. Do not add explanations.
@@ -57,7 +57,6 @@ def generate_examples_gemini(user_prompt: str, n_examples: int = 5) -> CodeExamp
     try:
         print("  Generating positive examples...")
         response_pos = client.chat.completions.create(
-            model="gemini-2.0-flash",
             messages=[{"role": "user", "content": positive_prompt}],
             response_model=CodeExample
         )
@@ -66,7 +65,6 @@ def generate_examples_gemini(user_prompt: str, n_examples: int = 5) -> CodeExamp
 
         print("  Generating negative examples...")
         response_neg = client.chat.completions.create(
-            model="gemini-2.0-flash",
             messages=[{"role": "user", "content": negative_prompt}],
             response_model=CodeExample
         )
@@ -85,28 +83,64 @@ def generate_examples_gemini(user_prompt: str, n_examples: int = 5) -> CodeExamp
 
 
 
-def get_sae_activations(model,tokenizer,sae,examples,layer_num,device):
+# def get_sae_activations(model,tokenizer,sae,examples,layer_num,device):
+#     activations = []
+#     tokenized_inputs = tokenizer(examples, padding="max_length", truncation=True, return_tensors="pt",max_length=512)
+#     input_ids = tokenized_inputs.input_ids.to(device)
+#     attention_mask = tokenized_inputs.attention_mask.to(device)
+#     # SHAPE: (batch_size, seq_len)
+#     with torch.no_grad():
+#         outputs = model(input_ids,
+#                         attention_mask=attention_mask,
+#                         output_hidden_states=True)   
+#         active_token_mask = attention_mask.bool() 
+#         # SHAPE: (batch_size, seq_len, hidden_size)
+#         layer_hidden_states = outputs.hidden_states[layer_num]
+#         # SHAPE: (batch_size, seq_len)
+#         layer_hidden_states = layer_hidden_states[active_token_mask]
+#         # SHAPE: (batch_size, seq_len, hidden_size)
+#         layer_hidden_states.to(device)
+#         sae_encoder_activations = sae.encoder(layer_hidden_states)
+#         activations.append(sae_encoder_activations)
+#     activations = torch.cat(activations,dim=0)
+#     return activations
+def get_sae_activations(model, tokenizer, sae, examples, layer_num, device):
     activations = []
-    tokenized_inputs = tokenizer(examples, padding="max_length", truncation=True, return_tensors="pt",max_length=512)
-    input_ids = tokenized_inputs.input_ids.to(device)
-    attention_mask = tokenized_inputs.attention_mask.to(device)
-    # SHAPE: (batch_size, seq_len)
-    with torch.no_grad():
-        outputs = model(input_ids,
-                        attention_mask=attention_mask,
-                        output_hidden_states=True)   
-        active_token_mask = attention_mask.bool() 
-        # SHAPE: (batch_size, seq_len, hidden_size)
-        layer_hidden_states = outputs.hidden_states[layer_num]
-        # SHAPE: (batch_size, seq_len)
-        layer_hidden_states = layer_hidden_states[active_token_mask]
-        # SHAPE: (batch_size, seq_len, hidden_size)
-        layer_hidden_states.to(device)
-        sae_encoder_activations = sae.encoder(layer_hidden_states)
-        activations.append(sae_encoder_activations)
-    activations = torch.cat(activations,dim=0)
-    return activations
 
+    # 1) Tokenize on CPU
+    tokenized_inputs = tokenizer(
+        examples,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+        max_length=512,
+    )
+    # 2) Move the inputs to the target device
+    input_ids      = tokenized_inputs.input_ids.to(device)
+    attention_mask = tokenized_inputs.attention_mask.to(device)
+    print("  model device:       ", next(model.parameters()).device)
+    print("  input_ids device:   ", input_ids.device)
+    print("  attention_mask dev: ", attention_mask.device)
+    with torch.no_grad():
+        # 3) Run the model on CUDA
+        outputs = model(
+            input_ids,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+
+        # 4) Select the layer, move it, then mask
+        layer_hidden_states = outputs.hidden_states[layer_num].to(device)
+        active_mask         = attention_mask.bool()
+        # now shape (num_active_tokens, hidden_size)
+        layer_hidden_states = layer_hidden_states[active_mask]
+        sae.to(device)
+        sae_encoder_acts = sae.encoder(layer_hidden_states)
+        activations.append(sae_encoder_acts)
+
+    # 6) Concatenate and return
+    activations = torch.cat(activations, dim=0)
+    return activations
 
 
 
@@ -118,5 +152,6 @@ def find_features(positive_activations, negative_activations,num_features=5):
     activation_differences = pos_means - neg_means
     top_feature_indices = activation_differences.argsort()[::-1][:num_features]    
     top_differences = activation_differences[top_feature_indices]
-    return top_feature_indices, top_differences
+    top_feature_ind = top_feature_indices.tolist()
+    return top_feature_ind, top_differences
     

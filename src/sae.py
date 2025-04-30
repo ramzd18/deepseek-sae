@@ -65,59 +65,59 @@ class SparseAutoencoder(nn.Module):
         x_rec = self.decoder(z)
         return x_rec, z
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-model     = AutoModelForCausalLM.from_pretrained(MODEL_NAME, output_hidden_states=True)
-model.to(DEVICE).eval()
+# tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+# model     = AutoModelForCausalLM.from_pretrained(MODEL_NAME, output_hidden_states=True)
+# model.to(DEVICE).eval()
 
-ds = CodeDataset(tokenizer)
-loader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True)
+# ds = CodeDataset(tokenizer)
+# loader = DataLoader(ds, batch_size=BATCH_SIZE, shuffle=True)
 
-saes = {}
-optimizers = {}
+# saes = {}
+# optimizers = {}
 
-for layer in LAYERS:
-    hidden_size = model.config.hidden_size
-    sae = SparseAutoencoder(hidden_size, bottleneck_size=1200).to(DEVICE)
-    opt = torch.optim.Adam(sae.parameters(), lr=LR)
-    saes[layer] = sae
-    optimizers[layer] = opt
+# for layer in LAYERS:
+#     hidden_size = model.config.hidden_size
+#     sae = SparseAutoencoder(hidden_size, bottleneck_size=1200).to(DEVICE)
+#     opt = torch.optim.Adam(sae.parameters(), lr=LR)
+#     saes[layer] = sae
+#     optimizers[layer] = opt
 
-for epoch in range(EPOCHS):
-    for input_ids, attn_mask in loader:
-        print("EXAMPLE")
-        input_ids = input_ids.to(DEVICE)
-        attn_mask = attn_mask.to(DEVICE)
+# for epoch in range(EPOCHS):
+#     for input_ids, attn_mask in loader:
+#         print("EXAMPLE")
+#         input_ids = input_ids.to(DEVICE)
+#         attn_mask = attn_mask.to(DEVICE)
 
-        with torch.no_grad():
-            outputs = model(input_ids,
-                            attention_mask=attn_mask,
-                            output_hidden_states=True)
-            hidden_states = outputs.hidden_states 
+#         with torch.no_grad():
+#             outputs = model(input_ids,
+#                             attention_mask=attn_mask,
+#                             output_hidden_states=True)
+#             hidden_states = outputs.hidden_states 
 
-        for layer in LAYERS:
-            optimizers[layer].zero_grad()
+#         for layer in LAYERS:
+#             optimizers[layer].zero_grad()
 
-            H = hidden_states[layer]
-            B, T, Hsz = H.size()
-            Hflat = H.view(B*T, Hsz)
+#             H = hidden_states[layer]
+#             B, T, Hsz = H.size()
+#             Hflat = H.view(B*T, Hsz)
 
-            Hrec, z = saes[layer](Hflat)
-            mse_loss = F.mse_loss(Hrec, Hflat)
-            l1_loss  = z.abs().mean()
-            loss = mse_loss + L1_WEIGHT * l1_loss
-            loss.backward()
-            optimizers[layer].step()
+#             Hrec, z = saes[layer](Hflat)
+#             mse_loss = F.mse_loss(Hrec, Hflat)
+#             l1_loss  = z.abs().mean()
+#             loss = mse_loss + L1_WEIGHT * l1_loss
+#             loss.backward()
+#             optimizers[layer].step()
 
-    print(f"Epoch {epoch+1}/{EPOCHS} complete.")
+#     print(f"Epoch {epoch+1}/{EPOCHS} complete.")
 
-api = HfApi()
-for layer, sae in saes.items():
-    local_path = f"sae_layer{layer}.pt"
-    torch.save(sae.state_dict(), local_path)
+# api = HfApi()
+# for layer, sae in saes.items():
+#     local_path = f"sae_layer{layer}.pt"
+#     torch.save(sae.state_dict(), local_path)
     
-    api.upload_file(
-        path_or_fileobj=local_path,
-        path_in_repo=f"sae_layer{layer}.pt",
-        repo_id=f"rpeddu/deepseek-sae{layer}",  
-        token="" 
-    )
+#     api.upload_file(
+#         path_or_fileobj=local_path,
+#         path_in_repo=f"sae_layer{layer}.pt",
+#         repo_id=f"rpeddu/deepseek-sae{layer}",  
+#         token="" 
+#     )
