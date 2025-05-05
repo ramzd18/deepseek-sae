@@ -1,8 +1,8 @@
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from sae import SparseAutoencoder
+from deepseek_sae.sae import SparseAutoencoder
 import torch
-from hooks import register_hooks
-from automated_feature_search import generate_examples_gemini,get_sae_activations,find_features
+from deepseek_sae.hooks import register_hooks
+from deepseek_sae.automated_feature_search import generate_examples_gemini,get_sae_activations,find_features
 from huggingface_hub import hf_hub_url, hf_hub_download
 
 
