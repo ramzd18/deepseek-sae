@@ -32,7 +32,7 @@ def make_hook(probe):
     return hook
 
 class InstructionDataset(Dataset):
-    def __init__(self, processor, max_len=16000, dataset_size=100000):
+    def __init__(self, processor, max_len=16000, dataset_size=200000):
         self.processor = processor
         self.max_len = max_len
         self.dataset = load_dataset("neulab/MultiUI", split="train")
